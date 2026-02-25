@@ -53,15 +53,17 @@
 <style>
   .titlebar {
     height: 32px;
-    background: #111;
+    background: var(--color-base-100);
     display: flex;
     justify-content: space-between;
     align-items: center;
     user-select: none;
     -webkit-user-select: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--color-base-200);
     cursor: default;
     z-index: 1000;
+    border-top-left-radius: var(--radius-box);
+    border-top-right-radius: var(--radius-box);
   }
 
   .left-section {
@@ -70,14 +72,14 @@
     gap: 10px;
     padding-left: 12px;
     height: 100%;
-    flex: 1; /* Makes the title section fill available space for better drag area */
+    flex: 1;
   }
 
   .logo {
     width: 14px;
     height: 14px;
-    background: #646cff;
-    border-radius: 3px;
+    background: var(--color-primary);
+    border-radius: var(--radius-selector);
   }
 
   .title {
@@ -85,8 +87,8 @@
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.1em;
+    color: var(--color-base-content);
     opacity: 0.5;
-    color: #fff;
   }
 
   .window-controls {
@@ -102,19 +104,21 @@
     align-items: center;
     background: transparent;
     border: none;
-    color: #888;
+    color: var(--color-base-content);
+    opacity: 0.6;
     transition: all 0.15s ease;
     outline: none;
   }
 
   .win-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    background: var(--color-base-200);
+    opacity: 1;
   }
 
   .win-btn.close:hover {
-    background: #e81123;
-    color: #fff;
+    background: var(--color-error);
+    color: var(--color-error-content);
+    opacity: 1;
   }
 
   /* Ensure text selection doesn't trigger during drag attempts */
