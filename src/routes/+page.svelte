@@ -16,25 +16,48 @@
     Loader2,
     Globe2,
     Box,
-    ExternalLink
+    ExternalLink,
+    TrendingUp
   } from "lucide-svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import ServerSettings from "../lib/components/ServerSettings.svelte";
   import ServerList from "../lib/components/ServerList.svelte";
   import TitleBar from "../lib/components/TitleBar.svelte";
+  import PlayerManager from "../lib/components/PlayerManager.svelte";
 
+  const appWindow = getCurrentWindow();
   let activeSubPage = $state("dashboard");
   let maxPlayers = $state(20);
+  let isMaximized = $state(false);
+  let commandInput = $state("");
 
   $effect(() => {
     maxPlayers = parseInt(serverStore.properties["max-players"] || "20");
   });
 
   onMount(() => {
+    const checkMaximized = async () => {
+      isMaximized = await appWindow.isMaximized();
+    };
+    checkMaximized();
+    const unlisten = appWindow.onResized(() => { checkMaximized(); });
+
     const interval = setInterval(() => {
       serverStore.refreshStats();
     }, 1000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+      unlisten.then(fn => fn());
+    };
   });
+
+  async function handleCommand(e: KeyboardEvent) {
+    if (e.key === "Enter" && commandInput.trim()) {
+      await serverStore.sendCommand(commandInput);
+      commandInput = "";
+    }
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -47,17 +70,14 @@
   };
 </script>
 
-<div class="h-screen bg-base-300 flex flex-col overflow-hidden font-sans text-base-content border border-base-200 shadow-lg rounded-[var(--radius-box)]">
-  <TitleBar />
+<div class="h-screen bg-base-300 flex flex-col overflow-hidden font-sans text-base-content border border-base-200 shadow-lg {isMaximized ? 'rounded-none border-none' : 'rounded-[var(--radius-box)]'}">
+  <TitleBar {isMaximized} />
 
   <div class="flex-1 flex overflow-hidden">
     <!-- Navigation Sidebar -->
     <aside class="w-72 bg-base-100 border-r border-base-200 flex flex-col z-20 shadow-md">
-      <!-- App Header -->
       <div class="p-6 flex items-center gap-3 border-b border-base-200 bg-base-200/20">
-        <div class="bg-primary text-primary-content p-2 rounded-xl shadow-sm">
-          <Server size={20} />
-        </div>
+        <div class="bg-primary text-primary-content p-2 rounded-xl shadow-sm"><Server size={20} /></div>
         <div>
           <h1 class="text-sm font-black tracking-tight leading-none uppercase italic">Roam MC</h1>
           <p class="text-[9px] uppercase font-bold opacity-30 tracking-[0.2em] mt-1">Management Hub</p>
@@ -81,7 +101,7 @@
                   </button>
                   <button 
                     class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'players' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
-                    onclick={() => activeSubPage = 'players'}
+                    onclick={() => { activeSubPage = 'players'; serverStore.refreshPlayers(); }}
                   >
                     <Users size={16} /> <span class="text-xs">Players</span>
                   </button>
@@ -129,7 +149,6 @@
           <p class="text-xl font-black uppercase tracking-[0.2em]">Select a Server Instance</p>
         </div>
       {:else}
-        <!-- Server Specific Header - Removed Blur -->
         <header class="h-16 bg-base-100 border-b border-base-200 px-8 flex items-center justify-between shrink-0 z-10">
           <div class="flex items-center gap-4">
             <div class="badge {getStatusColor(serverStore.stats.status)} badge-sm"></div>
@@ -139,7 +158,7 @@
           </div>
           
           <div class="flex items-center gap-4">
-            <div class="text-[9px] font-mono opacity-30 bg-base-200 px-3 py-1.5 rounded-lg border border-base-200 hidden md:block">
+            <div class="text-[9px] font-mono opacity-30 bg-base-200 px-3 py-1.5 rounded-lg border border-base-200 hidden md:block truncate max-w-[200px]">
               {serverStore.config.path}
             </div>
             <button class="btn btn-xs btn-ghost gap-2 opacity-40 hover:opacity-100 transition-none"><ExternalLink size={12}/> View Files</button>
@@ -149,40 +168,39 @@
         <div class="flex-1 overflow-hidden relative will-change-transform">
           {#if activeSubPage === "dashboard"}
             <div class="h-full p-8 flex flex-col gap-6">
-              <div class="grid grid-cols-1 xl:grid-cols-4 gap-6 shrink-0">
+              <!-- Dashboard Control Row: Responsive Grid -->
+              <div class="grid grid-cols-2 xl:grid-cols-5 gap-6 shrink-0">
                 <!-- Main Control Card -->
-                <div class="card bg-base-100 shadow-md border border-base-200 p-6 xl:col-span-2">
+                <div class="card bg-base-100 shadow-md border border-base-200 p-6 col-span-2 xl:col-span-2">
                   <div class="flex items-center justify-between gap-6">
                     <div class="flex items-center gap-4">
                       <div class="p-4 {serverStore.stats.status === 'Running' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'} rounded-2xl">
                         <Server size={32} />
                       </div>
                       <div>
-                        <p class="text-[10px] font-black uppercase opacity-40 tracking-widest">Instance Engine</p>
+                        <p class="text-[10px] font-black uppercase opacity-40 tracking-widest">Engine</p>
                         <p class="text-xl font-black">{serverStore.stats.status}</p>
                       </div>
                     </div>
-                    <div class="join shadow-sm ring-1 ring-base-200">
-                      <button 
-                        class="btn btn-lg join-item {serverStore.stats.status === 'Running' || serverStore.stats.status === 'Starting' ? 'btn-error' : 'btn-primary'} gap-3 px-8 transition-none"
-                        onclick={() => serverStore.toggleServer()}
-                        disabled={serverStore.stats.status === 'Stopping'}
-                      >
-                        {#if serverStore.stats.status === 'Starting'}
-                          <Loader2 size={20} class="animate-spin" /> STARTING
-                        {:else if serverStore.stats.status === 'Stopping'}
-                          <Loader2 size={20} class="animate-spin" /> STOPPING
-                        {:else if serverStore.stats.status === 'Running'}
-                          <Square size={20} fill="currentColor" /> STOP
-                        {:else}
-                          <Play size={20} fill="currentColor" /> START SERVER
-                        {/if}
-                      </button>
-                    </div>
+                    <button 
+                      class="btn btn-lg {serverStore.stats.status === 'Running' || serverStore.stats.status === 'Starting' ? 'btn-error' : 'btn-primary'} gap-3 px-8 transition-none shadow-sm"
+                      onclick={() => serverStore.toggleServer()}
+                      disabled={serverStore.stats.status === 'Stopping'}
+                    >
+                      {#if serverStore.stats.status === 'Starting'}
+                        <Loader2 size={20} class="animate-spin" /> STARTING
+                      {:else if serverStore.stats.status === 'Stopping'}
+                        <Loader2 size={20} class="animate-spin" /> STOPPING
+                      {:else if serverStore.stats.status === 'Running'}
+                        <Square size={20} fill="currentColor" /> STOP
+                      {:else}
+                        <Play size={20} fill="currentColor" /> START
+                      {/if}
+                    </button>
                   </div>
                 </div>
 
-                <!-- Metrics -->
+                <!-- Processor Card (Priority 1) -->
                 <div class="stats shadow-md bg-base-100 border border-base-200">
                   <div class="stat p-4">
                     <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Processor</div>
@@ -192,6 +210,8 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- Memory Card (Priority 2) -->
                 <div class="stats shadow-md bg-base-100 border border-base-200">
                   <div class="stat p-4">
                     <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Memory (RSS)</div>
@@ -201,9 +221,20 @@
                     </div>
                   </div>
                 </div>
+
+                <!-- Active Players Card (Priority 3) -->
+                <div class="stats shadow-md bg-base-100 border border-base-200 overflow-hidden col-span-2 md:col-span-1">
+                  <div class="stat p-4">
+                    <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Active Players</div>
+                    <div class="flex items-end gap-3">
+                      <div class="stat-value text-2xl font-mono text-info">{serverStore.stats.player_count}<span class="text-xs opacity-30">/{maxPlayers}</span></div>
+                      <div class="pb-1 text-info opacity-30"><TrendingUp size={16} /></div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <!-- Console Section - Removed Blur and Reduced Shadow -->
+              <!-- Console Section -->
               <div class="flex-1 bg-neutral rounded-3xl shadow-lg overflow-hidden flex flex-col border border-white/5 relative group">
                 <div class="bg-base-100/20 p-4 px-8 flex justify-between items-center border-b border-white/5">
                   <div class="flex items-center gap-4">
@@ -224,12 +255,33 @@
                     </div>
                   {/each}
                 </div>
+
+                <div class="bg-base-100/10 border-t border-white/5 p-4 px-8 flex items-center gap-4 group-focus-within:bg-base-100/20 transition-colors">
+                  <span class="text-primary font-black animate-pulse opacity-50">&gt;</span>
+                  <input 
+                    type="text" 
+                    placeholder={serverStore.stats.status === 'Running' ? "Send command to server..." : "Server must be running to send commands"}
+                    class="bg-transparent border-none outline-none flex-1 font-mono text-xs text-neutral-content placeholder:opacity-20 disabled:cursor-not-allowed"
+                    bind:value={commandInput}
+                    onkeydown={handleCommand}
+                    disabled={serverStore.stats.status !== 'Running'}
+                  />
+                  <div class="flex gap-2 opacity-20 group-focus-within:opacity-50 transition-opacity">
+                    <kbd class="kbd kbd-xs">ENTER</kbd>
+                  </div>
+                </div>
               </div>
             </div>
           {:else if activeSubPage === "settings"}
             <div class="h-full p-8 overflow-hidden will-change-transform">
               <div class="max-w-5xl mx-auto h-full overflow-y-auto custom-scrollbar pr-4">
                 <ServerSettings />
+              </div>
+            </div>
+          {:else if activeSubPage === "players"}
+            <div class="h-full p-8 overflow-hidden will-change-transform">
+              <div class="max-w-6xl mx-auto h-full overflow-y-auto custom-scrollbar pr-4">
+                <PlayerManager />
               </div>
             </div>
           {:else}

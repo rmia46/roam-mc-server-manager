@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { X, Minus, Square } from "lucide-svelte";
 
+  let { isMaximized } = $props();
   const appWindow = getCurrentWindow();
 
   async function handleMouseDown(e: MouseEvent) {
@@ -27,7 +28,7 @@
 </script>
 
 <div 
-  class="titlebar" 
+  class="titlebar {isMaximized ? 'sharp' : 'rounded'}" 
   onmousedown={handleMouseDown}
   ondblclick={handleDoubleClick}
   data-tauri-drag-region
@@ -62,8 +63,17 @@
     border-bottom: 1px solid var(--color-base-200);
     cursor: default;
     z-index: 1000;
+    transition: border-radius 0.1s;
+  }
+
+  .titlebar.rounded {
     border-top-left-radius: var(--radius-box);
     border-top-right-radius: var(--radius-box);
+  }
+
+  .titlebar.sharp {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
 
   .left-section {
@@ -121,7 +131,6 @@
     opacity: 1;
   }
 
-  /* Ensure text selection doesn't trigger during drag attempts */
   :global(::selection) {
     background: transparent;
   }

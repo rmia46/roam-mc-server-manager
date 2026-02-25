@@ -14,3 +14,10 @@ export interface ServerStats {
 }
 
 export type ServerProperties = Record<string, string>;
+
+export interface PlayerInfo {
+  uuid: string;
+  name: string;
+  time_played: number;
+  steps: number;
+}

@@ -6,6 +6,7 @@ class ServerStore {
   servers = $state<ServerConfig[]>([]);
   config = $state<ServerConfig | null>(null);
   stats = $state<ServerStats>({ cpu: 0, memory: 0, status: "Offline", player_count: 0 });
+  players = $state<PlayerInfo[]>([]);
   properties = $state<ServerProperties>({});
   logs = $state<string[]>([]);
   isDownloading = $state(false);
@@ -13,6 +14,17 @@ class ServerStore {
   constructor() {
     this.setupListeners();
     this.loadServers();
+  }
+
+  async refreshPlayers() {
+    if (this.config) {
+      try {
+        const p = await invoke("get_players_data", { path: this.config.path });
+        this.players = p as PlayerInfo[];
+      } catch (e) {
+        console.error("Failed to fetch player data", e);
+      }
+    }
   }
 
   async setupListeners() {
@@ -57,9 +69,12 @@ class ServerStore {
   }
 
   async deleteServer(index: number) {
+    const deletedServer = this.servers[index];
     this.servers.splice(index, 1);
     this.saveServers();
-    if (this.config && this.servers[index] && this.config.path === this.servers[index].path) {
+    
+    // Clear current config if it was the one deleted
+    if (this.config && deletedServer && this.config.path === deletedServer.path) {
       this.config = null;
     }
   }
@@ -92,6 +107,13 @@ class ServerStore {
       this.logs = ["[System] Initializing startup..."];
       await invoke("start_server");
     }
+    await this.refreshStats();
+  }
+
+  async takeOverOrphan() {
+    this.logs = [...this.logs.slice(-500), "[System] Taking control of orphaned process..."];
+    await invoke("stop_server");
+    await this.toggleServer();
   }
 
   async refreshProperties() {
@@ -105,6 +127,19 @@ class ServerStore {
     if (this.config) {
       await invoke("write_properties", { path: this.config.path, props });
       this.properties = props;
+    }
+  }
+
+  async sendCommand(command: string) {
+    if (this.stats.status === "Running") {
+      try {
+        await invoke("send_server_command", { command });
+        // Immediate visual feedback in console
+        this.logs = [...this.logs.slice(-500), `[Input] > ${command}`];
+      } catch (e) {
+        console.error("Command failed:", e);
+        this.logs = [...this.logs.slice(-500), `[System] Error: ${e}`];
+      }
     }
   }
 

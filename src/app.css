@@ -34,9 +34,10 @@
     -webkit-user-select: text;
   }
 
-  /* High contrast selection color */
+  /* Extreme contrast selection color for visibility */
   ::selection {
-    @apply bg-primary/30 text-white;
+    background-color: var(--color-primary) !important;
+    color: var(--color-primary-content) !important;
   }
 }
 
