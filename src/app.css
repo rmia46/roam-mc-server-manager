@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@plugin "daisyui";
+
+@theme {
+  --font-sans: "Inter", "Avenir", "Helvetica", "Arial", sans-serif;
+}
+
+@layer components {
+  .tab-active {
+    @apply !bg-primary !text-primary-content !font-black;
+  }
+}
