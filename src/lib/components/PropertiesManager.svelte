@@ -1,6 +1,6 @@
 <script lang="ts">
   import { serverStore } from "../server-store.svelte";
-  import { Settings, Save, RefreshCw, Search, CheckCircle2, ChevronDown } from "lucide-svelte";
+  import { Settings, Save, RefreshCw, Search, CheckCircle2 } from "lucide-svelte";
 
   let editedProps = $state<Record<string, string>>({});
   let searchQuery = $state("");
@@ -18,7 +18,10 @@
       await serverStore.saveProperties(editedProps);
       saveState = "saved";
       saveFeedback = true;
-      setTimeout(() => { saveState = "idle"; }, 2500);
+      setTimeout(() => { 
+        saveState = "idle"; 
+        saveFeedback = false;
+      }, 2500);
     } catch (e) {
       console.error(e);
       saveState = "idle";
@@ -38,7 +41,7 @@
 
 <div class="h-full flex flex-col gap-4 relative">
   <!-- Toolbar -->
-  <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-base-100 p-4 rounded-2xl border border-base-200 shadow-sm">
+  <div class="flex flex-col md:flex-row justify-between items-center gap-4 bg-base-100 p-4 rounded-2xl border border-base-200 shadow-sm shrink-0">
     <div class="relative w-full md:w-64">
       <Search size={14} class="absolute left-3 top-1/2 -translate-y-1/2 opacity-30" />
       <input 
@@ -56,12 +59,12 @@
         </div>
       {/if}
 
-      <button class="btn btn-sm btn-ghost gap-2 opacity-40 hover:opacity-100" onclick={refresh}>
+      <button class="btn btn-sm btn-ghost gap-2 opacity-40 hover:opacity-100 transition-none" onclick={refresh}>
         <RefreshCw size={14} />
       </button>
       
       <button 
-        class="btn btn-sm min-w-[160px] gap-2 shadow-lg border-none transition-all duration-300
+        class="btn btn-sm min-w-[160px] gap-2 shadow-lg border-none transition-none
                {saveState === 'saved' ? 'bg-success text-success-content scale-105' : 'bg-primary text-primary-content hover:bg-primary/90'}
                {saveState === 'saving' ? 'cursor-wait opacity-80' : 'cursor-default'}" 
         onclick={save}
@@ -70,9 +73,9 @@
           <span class="loading loading-spinner loading-xs"></span>
           <span class="text-[10px] font-black uppercase tracking-widest">Saving...</span>
         {:else if saveState === "saved"}
-          <div class="flex items-center gap-2 animate-in zoom-in-90 duration-300">
-            <CheckCircle2 size={14} class="animate-bounce" />
-            <span class="text-[10px] font-black uppercase tracking-widest">Config Saved!</span>
+          <div class="flex items-center gap-2">
+            <CheckCircle2 size={14} />
+            <span class="text-[10px] font-black uppercase tracking-widest">Saved!</span>
           </div>
         {:else}
           <Save size={14} />
@@ -82,36 +85,32 @@
     </div>
   </div>
 
-  <!-- Properties List -->
-  <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar bg-base-100 rounded-3xl border border-base-200">
+  <!-- Properties List: Optimized for Scrolling -->
+  <div class="flex-1 overflow-y-auto pr-2 custom-scrollbar bg-base-100 rounded-3xl border border-base-200 will-change-scroll translate-z-0">
     <div class="divide-y divide-base-200">
       {#each filteredProps as [key, value]}
-        <div class="flex flex-col md:flex-row items-start md:items-center justify-between p-4 hover:bg-primary/5 transition-colors group">
-          <div class="flex flex-col gap-1 mb-2 md:mb-0">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between p-4 hover:bg-primary/5 transition-none group">
+          <div class="flex flex-col gap-1 mb-2 md:mb-0 pointer-events-none">
             <span class="text-[10px] font-black tracking-widest uppercase text-primary/60">{key.replace(/-/g, ' ')}</span>
             <span class="text-[9px] font-mono opacity-20 italic lowercase">{key}</span>
           </div>
           
           <div class="w-full md:w-64">
             {#if value === "true" || value === "false"}
-              <!-- 
-                Custom DaisyUI Boolean Selector
-                Replaces native <select> to prevent OS takeover.
-              -->
               <div class="join w-full">
                 <button 
-                  class="btn btn-xs join-item flex-1 {editedProps[key] === 'true' ? 'btn-primary' : 'btn-ghost opacity-40'}"
+                  class="btn btn-xs join-item flex-1 transition-none {editedProps[key] === 'true' ? 'btn-primary' : 'btn-ghost bg-base-200/50 opacity-40'}"
                   onclick={() => editedProps[key] = 'true'}
                 >true</button>
                 <button 
-                  class="btn btn-xs join-item flex-1 {editedProps[key] === 'false' ? 'btn-primary' : 'btn-ghost opacity-40'}"
+                  class="btn btn-xs join-item flex-1 transition-none {editedProps[key] === 'false' ? 'btn-primary' : 'btn-ghost bg-base-200/50 opacity-40'}"
                   onclick={() => editedProps[key] = 'false'}
                 >false</button>
               </div>
             {:else}
               <input 
                 type="text" 
-                class="input input-sm input-bordered w-full font-mono text-xs bg-base-200 border-none focus:ring-1 ring-primary/50 transition-all" 
+                class="input input-sm input-bordered w-full font-mono text-xs bg-base-200 border-none focus:ring-1 ring-primary/50 transition-none" 
                 bind:value={editedProps[key]} 
               />
             {/if}
@@ -130,11 +129,9 @@
 </div>
 
 <style>
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
+  .will-change-scroll {
+    will-change: scroll-position;
+    transform: translateZ(0); /* Force GPU layer */
+    backface-visibility: hidden;
   }
 </style>
