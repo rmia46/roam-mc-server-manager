@@ -21,3 +21,9 @@ export interface PlayerInfo {
   time_played: number;
   steps: number;
 }
+
+export interface WorldInfo {
+  name: string;
+  size_mb: number;
+  last_modified: string;
+}

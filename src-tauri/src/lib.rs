@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write, Read};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use sysinfo::{Pid, System};
 use tauri::{Emitter, Manager, State, Window, WindowEvent};
+use walkdir::WalkDir;
+use zip::write::SimpleFileOptions;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ServerConfig {
@@ -37,8 +39,15 @@ pub struct ServerStats {
 pub struct PlayerInfo {
     pub uuid: String,
     pub name: String,
-    pub time_played: f64, // in hours
+    pub time_played: f64,
     pub steps: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WorldInfo {
+    pub name: String,
+    pub size_mb: f64,
+    pub last_modified: String,
 }
 
 pub struct AppState {
@@ -51,23 +60,97 @@ pub struct AppState {
 fn find_orphaned_java_process(server_path: &str) -> Option<Pid> {
     let mut sys = System::new_all();
     sys.refresh_all();
-    
     for (pid, process) in sys.processes() {
         let name = process.name().to_string_lossy().to_lowercase();
         if name.contains("java") {
             if let Some(cwd) = process.cwd() {
-                if cwd.to_string_lossy() == server_path {
-                    return Some(*pid);
-                }
+                if cwd.to_string_lossy() == server_path { return Some(*pid); }
             }
             for arg in process.cmd() {
-                if arg.to_string_lossy().contains(server_path) {
-                    return Some(*pid);
-                }
+                if arg.to_string_lossy().contains(server_path) { return Some(*pid); }
             }
         }
     }
     None
+}
+
+#[tauri::command]
+async fn get_worlds(path: String) -> Result<Vec<WorldInfo>, String> {
+    let mut worlds = Vec::new();
+    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_dir() && path.join("level.dat").exists() {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+            
+            // Format time using chrono
+            let last_modified = if let Ok(time) = metadata.modified() {
+                let dt: chrono::DateTime<chrono::Local> = time.into();
+                dt.format("%d %b %Y, %H:%M").to_string()
+            } else {
+                "Unknown".to_string()
+            };
+            
+            // Calculate total size of directory
+            let total_size: u64 = WalkDir::new(&path)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.metadata().ok())
+                .filter(|m| m.is_file())
+                .map(|m| m.len())
+                .sum();
+
+            worlds.push(WorldInfo {
+                name,
+                size_mb: (total_size as f64) / 1024.0 / 1024.0,
+                last_modified,
+            });
+        }
+    }
+    Ok(worlds)
+}
+
+#[tauri::command]
+async fn backup_world(server_path: String, world_name: String) -> Result<String, String> {
+    let world_dir = Path::new(&server_path).join(&world_name);
+    let backup_dir = Path::new(&server_path).join("roam_backups");
+    
+    if !backup_dir.exists() {
+        fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+    }
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let backup_filename = format!("{}_{}.zip", world_name, timestamp);
+    let backup_path = backup_dir.join(&backup_filename);
+
+    let file = fs::File::create(&backup_path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o755);
+
+    let mut buffer = Vec::new();
+    for entry in WalkDir::new(&world_dir) {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let name = path.strip_prefix(&world_dir).map_err(|e| e.to_string())?;
+
+        if path.is_file() {
+            zip.start_file(name.to_string_lossy().to_string(), options).map_err(|e| e.to_string())?;
+            let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
+            f.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
+            zip.write_all(&buffer).map_err(|e| e.to_string())?;
+            buffer.clear();
+        } else if !name.as_os_str().is_empty() {
+            zip.add_directory(name.to_string_lossy().to_string(), options).map_err(|e| e.to_string())?;
+        }
+    }
+
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(backup_filename)
 }
 
 #[tauri::command]
@@ -82,9 +165,7 @@ async fn select_jar_file(app: tauri::AppHandle) -> Result<Option<ServerConfig>, 
         let parent = path.parent().ok_or("Invalid path")?.to_string_lossy().to_string();
         let file_name = path.file_name().ok_or("Invalid filename")?.to_string_lossy().to_string();
         Ok(Some(ServerConfig { name: None, path: parent, jar_name: file_name, min_ram: "1G".into(), max_ram: "2G".into() }))
-    } else {
-        Ok(None)
-    }
+    } else { Ok(None) }
 }
 
 #[tauri::command]
@@ -100,23 +181,18 @@ async fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
         let conf = state.config.lock().unwrap();
         conf.clone().ok_or("Server not configured")?
     };
-
     if let Some(pid) = find_orphaned_java_process(&config.path) {
         return Err(format!("Existing process found (PID {}). Please stop it.", pid));
     }
-
     let mut child_process = state.child_process.lock().unwrap();
     if child_process.is_some() { return Err("Server already running".into()); }
-
     {
         let mut status = state.status.lock().unwrap();
         *status = ServerStatus::Starting;
         app.emit("status-update", ServerStatus::Starting).unwrap();
     }
-
     let eula_path = Path::new(&config.path).join("eula.txt");
     fs::write(eula_path, "eula=true").map_err(|e| e.to_string())?;
-
     let mut child = Command::new("java")
         .arg(format!("-Xms{}", config.min_ram))
         .arg(format!("-Xmx{}", config.max_ram))
@@ -129,12 +205,10 @@ async fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
             app.emit("status-update", ServerStatus::Offline).unwrap();
             format!("Failed to start: {}", e)
         })?;
-
     let stdout = child.stdout.take().unwrap();
     let player_count = Arc::clone(&state.player_count);
     let status_clone = Arc::clone(&state.status);
     let app_clone = app.clone();
-
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut started = false;
@@ -159,7 +233,6 @@ async fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
         *status = ServerStatus::Offline;
         app_clone.emit("status-update", ServerStatus::Offline).unwrap();
     });
-
     *child_process = Some(child);
     Ok(())
 }
@@ -171,10 +244,8 @@ async fn stop_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
         *status = ServerStatus::Stopping;
         app.emit("status-update", ServerStatus::Stopping).unwrap();
     }
-
     let mut child_process = state.child_process.lock().unwrap();
     let mut stopped = false;
-    
     if let Some(mut child) = child_process.take() {
         child.kill().map_err(|e| e.to_string())?;
         let _ = child.wait();
@@ -184,7 +255,6 @@ async fn stop_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
             let conf = state.config.lock().unwrap();
             conf.clone().ok_or("Server not configured")?
         };
-
         if let Some(pid) = find_orphaned_java_process(&config.path) {
             let mut sys = System::new_all();
             sys.refresh_all();
@@ -201,13 +271,11 @@ async fn stop_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
             }
         }
     }
-
     {
         let mut status = state.status.lock().unwrap();
         *status = ServerStatus::Offline;
         app.emit("status-update", ServerStatus::Offline).unwrap();
     }
-    
     Ok(stopped)
 }
 
@@ -216,7 +284,6 @@ async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, Str
     let mut child_lock = state.child_process.lock().unwrap();
     let pc = *state.player_count.lock().unwrap();
     let mut status = state.status.lock().unwrap().clone();
-
     if let Some(child) = child_lock.as_mut() {
         match child.try_wait() {
             Ok(Some(_)) => *child_lock = None,
@@ -231,7 +298,6 @@ async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, Str
             Err(_) => *child_lock = None,
         }
     }
-
     let config_lock = state.config.lock().unwrap();
     if let Some(config) = config_lock.as_ref() {
         if let Some(pid) = find_orphaned_java_process(&config.path) {
@@ -243,7 +309,6 @@ async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, Str
             }
         }
     }
-
     Ok(ServerStats { cpu: 0.0, memory: 0, status: ServerStatus::Offline, player_count: pc })
 }
 
@@ -283,7 +348,6 @@ fn maximize_window(window: Window) {
 
 #[tauri::command]
 async fn get_players_data(path: String) -> Result<Vec<PlayerInfo>, String> {
-    // 1. Detect world folder from server.properties
     let prop_path = Path::new(&path).join("server.properties");
     let mut world_name = String::from("world");
     if prop_path.exists() {
@@ -296,15 +360,9 @@ async fn get_players_data(path: String) -> Result<Vec<PlayerInfo>, String> {
             }
         }
     }
-
     let stats_path = Path::new(&path).join(&world_name).join("stats");
     let cache_path = Path::new(&path).join("usercache.json");
-
-    if !stats_path.exists() {
-        return Ok(Vec::new());
-    }
-
-    // 2. Read User Cache robustly
+    if !stats_path.exists() { return Ok(Vec::new()); }
     let mut uuid_to_name = HashMap::new();
     if cache_path.exists() {
         if let Ok(cache_content) = fs::read_to_string(cache_path) {
@@ -319,29 +377,22 @@ async fn get_players_data(path: String) -> Result<Vec<PlayerInfo>, String> {
             }
         }
     }
-
-    // 3. Parse Stats files with relaxed naming
     let mut players = Vec::new();
     for entry in fs::read_dir(stats_path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let file_path = entry.path();
-        
         if file_path.extension().map_or(false, |ext| ext == "json") {
             let uuid = file_path.file_stem().unwrap().to_string_lossy().to_string();
             let name = uuid_to_name.get(&uuid).cloned().unwrap_or_else(|| uuid.clone());
-            
             if let Ok(content) = fs::read_to_string(&file_path) {
                 if let Ok(stats) = serde_json::from_str::<serde_json::Value>(&content) {
                     let custom = &stats["stats"]["minecraft:custom"];
-                    
                     let ticks = custom["minecraft:play_time"].as_u64()
                         .or(custom["minecraft:play_one_minute"].as_u64())
                         .unwrap_or(0);
-                    
                     let hours = (ticks as f64) / 20.0 / 3600.0;
                     let cm_walked = custom["minecraft:walk_one_cm"].as_u64().unwrap_or(0);
                     let steps = cm_walked / 75;
-
                     players.push(PlayerInfo { uuid, name, time_played: hours, steps });
                 }
             }
@@ -360,9 +411,14 @@ async fn send_server_command(command: String, state: State<'_, AppState>) -> Res
         stdin.flush().map_err(|e: std::io::Error| e.to_string())?;
         Ok(())
     } else {
-        // Fallback: If it's an orphaned process, we can't send commands easily via stdin
         Err("Cannot send commands to an orphaned process. Only servers started via this manager support direct commands.".into())
     }
+}
+
+#[tauri::command]
+fn open_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -402,7 +458,7 @@ pub fn run() {
             read_properties, write_properties, select_jar_file,
             close_window, minimize_window, maximize_window,
             is_server_initialized, delete_directory, get_players_data,
-            send_server_command
+            send_server_command, open_folder, get_worlds, backup_world
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

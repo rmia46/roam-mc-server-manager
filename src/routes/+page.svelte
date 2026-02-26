@@ -19,11 +19,13 @@
     ExternalLink,
     TrendingUp
   } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import ServerSettings from "../lib/components/ServerSettings.svelte";
   import ServerList from "../lib/components/ServerList.svelte";
   import TitleBar from "../lib/components/TitleBar.svelte";
   import PlayerManager from "../lib/components/PlayerManager.svelte";
+  import WorldManager from "../lib/components/WorldManager.svelte";
 
   const appWindow = getCurrentWindow();
   let activeSubPage = $state("dashboard");
@@ -59,6 +61,12 @@
     }
   }
 
+  async function openServerFolder() {
+    if (serverStore.config) {
+      await invoke("open_folder", { path: serverStore.config.path });
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Running": return "badge-success";
@@ -80,7 +88,7 @@
         <div class="bg-primary text-primary-content p-2 rounded-xl shadow-sm"><Server size={20} /></div>
         <div>
           <h1 class="text-sm font-black tracking-tight leading-none uppercase italic">Roam MC</h1>
-          <p class="text-[9px] uppercase font-bold opacity-30 tracking-[0.2em] mt-1">Management Hub</p>
+          <p class="text-[9px] uppercase font-bold opacity-50 tracking-[0.2em] mt-1 text-primary">Management Hub</p>
         </div>
       </div>
 
@@ -91,34 +99,34 @@
 
             {#if serverStore.config}
               <div class="space-y-4 pt-4 border-t border-base-200">
-                <h3 class="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 px-2">Control Panel</h3>
+                <h3 class="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 px-2">Control Panel</h3>
                 <div class="space-y-1">
                   <button 
-                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'dashboard' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
+                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'dashboard' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-80'}"
                     onclick={() => activeSubPage = 'dashboard'}
                   >
                     <LayoutDashboard size={16} /> <span class="text-xs">Dashboard</span>
                   </button>
                   <button 
-                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'players' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
+                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'players' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-80'}"
                     onclick={() => { activeSubPage = 'players'; serverStore.refreshPlayers(); }}
                   >
                     <Users size={16} /> <span class="text-xs">Players</span>
                   </button>
                   <button 
-                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'worlds' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
-                    onclick={() => activeSubPage = 'worlds'}
+                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'worlds' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-80'}"
+                    onclick={() => { activeSubPage = 'worlds'; serverStore.refreshWorlds(); }}
                   >
                     <Globe2 size={16} /> <span class="text-xs">Worlds</span>
                   </button>
                   <button 
-                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'mods' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
+                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'mods' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-80'}"
                     onclick={() => activeSubPage = 'mods'}
                   >
                     <Box size={16} /> <span class="text-xs">Mods & Plugins</span>
                   </button>
                   <button 
-                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'settings' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-70'}"
+                    class="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-100 {activeSubPage === 'settings' ? 'bg-primary text-primary-content font-bold shadow-sm' : 'hover:bg-base-200 opacity-80'}"
                     onclick={() => activeSubPage = 'settings'}
                   >
                     <Settings2 size={16} /> <span class="text-xs">Server Settings</span>
@@ -132,7 +140,7 @@
 
       {#if serverStore.config}
         <div class="p-4 border-t border-base-200 bg-base-200/10">
-          <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest opacity-40 mb-2 px-1">
+          <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest opacity-60 mb-2 px-1">
             <span>{serverStore.stats.status}</span>
             <span>{serverStore.stats.player_count}/{maxPlayers}</span>
           </div>
@@ -144,7 +152,7 @@
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col min-w-0 relative bg-base-300">
       {#if !serverStore.config}
-        <div class="h-full flex flex-col items-center justify-center opacity-20 gap-4">
+        <div class="h-full flex flex-col items-center justify-center opacity-30 gap-4">
           <Server size={64} />
           <p class="text-xl font-black uppercase tracking-[0.2em]">Select a Server Instance</p>
         </div>
@@ -154,21 +162,22 @@
             <div class="badge {getStatusColor(serverStore.stats.status)} badge-sm"></div>
             <h2 class="font-black text-lg tracking-tight uppercase italic">{serverStore.config.name}</h2>
             <div class="divider divider-horizontal mx-0 h-4 opacity-20"></div>
-            <span class="text-[10px] font-bold uppercase opacity-40 tracking-widest">{activeSubPage}</span>
+            <span class="text-[10px] font-bold uppercase opacity-60 tracking-widest">{activeSubPage}</span>
           </div>
           
           <div class="flex items-center gap-4">
-            <div class="text-[9px] font-mono opacity-30 bg-base-200 px-3 py-1.5 rounded-lg border border-base-200 hidden md:block truncate max-w-[200px]">
+            <div class="text-[9px] font-mono opacity-60 bg-base-200 px-3 py-1.5 rounded-lg border border-base-200 hidden md:block truncate max-w-[200px]">
               {serverStore.config.path}
             </div>
-            <button class="btn btn-xs btn-ghost gap-2 opacity-40 hover:opacity-100 transition-none"><ExternalLink size={12}/> View Files</button>
+            <button class="btn btn-xs btn-ghost gap-2 opacity-60 hover:opacity-100 transition-none" onclick={openServerFolder}>
+              <ExternalLink size={12}/> View Files
+            </button>
           </div>
         </header>
 
         <div class="flex-1 overflow-hidden relative will-change-transform">
           {#if activeSubPage === "dashboard"}
             <div class="h-full p-8 flex flex-col gap-6">
-              <!-- Dashboard Control Row: Responsive Grid -->
               <div class="grid grid-cols-2 xl:grid-cols-5 gap-6 shrink-0">
                 <!-- Main Control Card -->
                 <div class="card bg-base-100 shadow-md border border-base-200 p-6 col-span-2 xl:col-span-2">
@@ -178,7 +187,7 @@
                         <Server size={32} />
                       </div>
                       <div>
-                        <p class="text-[10px] font-black uppercase opacity-40 tracking-widest">Engine</p>
+                        <p class="text-[10px] font-black uppercase opacity-60 tracking-widest">Engine</p>
                         <p class="text-xl font-black">{serverStore.stats.status}</p>
                       </div>
                     </div>
@@ -200,74 +209,74 @@
                   </div>
                 </div>
 
-                <!-- Processor Card (Priority 1) -->
+                <!-- Processor Card -->
                 <div class="stats shadow-md bg-base-100 border border-base-200">
                   <div class="stat p-4">
-                    <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Processor</div>
+                    <div class="stat-label text-[10px] font-black uppercase opacity-60 mb-1 text-primary">Processor</div>
                     <div class="flex items-end gap-2">
                       <div class="stat-value text-2xl font-mono text-primary">{serverStore.stats.cpu.toFixed(0)}%</div>
-                      <progress class="progress progress-primary w-full h-1 mb-2 opacity-20" value={serverStore.stats.cpu} max="100"></progress>
+                      <progress class="progress progress-primary w-full h-1 mb-2 opacity-40" value={serverStore.stats.cpu} max="100"></progress>
                     </div>
                   </div>
                 </div>
 
-                <!-- Memory Card (Priority 2) -->
+                <!-- Memory Card -->
                 <div class="stats shadow-md bg-base-100 border border-base-200">
                   <div class="stat p-4">
-                    <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Memory (RSS)</div>
+                    <div class="stat-label text-[10px] font-black uppercase opacity-60 mb-1 text-secondary">Memory (RSS)</div>
                     <div class="flex items-end gap-2">
                       <div class="stat-value text-2xl font-mono text-secondary">{(serverStore.stats.memory / 1024 / 1024).toFixed(0)}<span class="text-xs font-normal">M</span></div>
-                      <progress class="progress progress-secondary w-full h-1 mb-2 opacity-20" value={serverStore.stats.memory / 1024 / 1024} max={4096}></progress>
+                      <progress class="progress progress-secondary w-full h-1 mb-2 opacity-40" value={serverStore.stats.memory / 1024 / 1024} max={4096}></progress>
                     </div>
                   </div>
                 </div>
 
-                <!-- Active Players Card (Priority 3) -->
+                <!-- Active Players Card -->
                 <div class="stats shadow-md bg-base-100 border border-base-200 overflow-hidden col-span-2 md:col-span-1">
                   <div class="stat p-4">
-                    <div class="stat-label text-[10px] font-black uppercase opacity-40 mb-1">Active Players</div>
+                    <div class="stat-label text-[10px] font-black uppercase opacity-60 mb-1 text-info">Active Players</div>
                     <div class="flex items-end gap-3">
-                      <div class="stat-value text-2xl font-mono text-info">{serverStore.stats.player_count}<span class="text-xs opacity-30">/{maxPlayers}</span></div>
-                      <div class="pb-1 text-info opacity-30"><TrendingUp size={16} /></div>
+                      <div class="stat-value text-2xl font-mono text-info">{serverStore.stats.player_count}<span class="text-sm opacity-50 font-bold">/{maxPlayers}</span></div>
+                      <div class="pb-1 text-info opacity-50"><TrendingUp size={16} /></div>
                     </div>
                   </div>
                 </div>
               </div>
 
               <!-- Console Section -->
-              <div class="flex-1 bg-neutral rounded-3xl shadow-lg overflow-hidden flex flex-col border border-white/5 relative group">
+              <div class="flex-1 bg-neutral rounded-3xl shadow-lg overflow-hidden flex flex-col border border-white/5 relative group text-neutral-content">
                 <div class="bg-base-100/20 p-4 px-8 flex justify-between items-center border-b border-white/5">
                   <div class="flex items-center gap-4">
                     <div class="flex gap-1.5">
-                      <div class="w-2 h-2 rounded-full bg-error/40"></div>
-                      <div class="w-2 h-2 rounded-full bg-warning/40"></div>
-                      <div class="w-2 h-2 rounded-full bg-success/40"></div>
+                      <div class="w-2 h-2 rounded-full bg-error/60"></div>
+                      <div class="w-2 h-2 rounded-full bg-warning/60"></div>
+                      <div class="w-2 h-2 rounded-full bg-success/60"></div>
                     </div>
-                    <span class="text-[10px] font-black tracking-[0.3em] opacity-30 uppercase ml-2">Console</span>
+                    <span class="text-[10px] font-black tracking-[0.3em] opacity-50 uppercase ml-2">Console</span>
                   </div>
-                  <button class="btn btn-ghost btn-xs opacity-20 hover:opacity-100 hover:bg-white/5 rounded-lg px-4 transition-none" onclick={() => serverStore.logs = []}>Clear</button>
+                  <button class="btn btn-ghost btn-xs opacity-40 hover:opacity-100 hover:bg-white/5 rounded-lg px-4 transition-none text-[10px] font-bold" onclick={() => serverStore.logs = []}>CLEAR BUFFER</button>
                 </div>
                 <div class="flex-1 p-8 overflow-y-auto font-mono text-[11px] flex flex-col-reverse gap-2 select-text custom-scrollbar will-change-scroll">
                   {#each serverStore.logs.slice().reverse() as log}
                     <div class="flex gap-6 group/line transition-none -mx-8 px-8 py-0.5 border-l-2 border-transparent hover:border-primary/40">
-                      <span class="opacity-10 select-none shrink-0 font-bold w-20">{new Date().toLocaleTimeString([], {hour12: false})}</span>
-                      <span class="text-neutral-content/80 leading-relaxed whitespace-pre-wrap">{log}</span>
+                      <span class="opacity-30 select-none shrink-0 font-bold w-20">{new Date().toLocaleTimeString([], {hour12: false})}</span>
+                      <span class="text-neutral-content leading-relaxed whitespace-pre-wrap">{log}</span>
                     </div>
                   {/each}
                 </div>
 
                 <div class="bg-base-100/10 border-t border-white/5 p-4 px-8 flex items-center gap-4 group-focus-within:bg-base-100/20 transition-colors">
-                  <span class="text-primary font-black animate-pulse opacity-50">&gt;</span>
+                  <span class="text-primary font-black opacity-80">&gt;</span>
                   <input 
                     type="text" 
                     placeholder={serverStore.stats.status === 'Running' ? "Send command to server..." : "Server must be running to send commands"}
-                    class="bg-transparent border-none outline-none flex-1 font-mono text-xs text-neutral-content placeholder:opacity-20 disabled:cursor-not-allowed"
+                    class="bg-transparent border-none outline-none flex-1 font-mono text-xs text-neutral-content placeholder:opacity-40 disabled:cursor-not-allowed"
                     bind:value={commandInput}
                     onkeydown={handleCommand}
                     disabled={serverStore.stats.status !== 'Running'}
                   />
-                  <div class="flex gap-2 opacity-20 group-focus-within:opacity-50 transition-opacity">
-                    <kbd class="kbd kbd-xs">ENTER</kbd>
+                  <div class="flex gap-2 opacity-40 group-focus-within:opacity-80 transition-opacity">
+                    <kbd class="kbd kbd-xs bg-neutral-900 border-none">ENTER</kbd>
                   </div>
                 </div>
               </div>
@@ -284,13 +293,19 @@
                 <PlayerManager />
               </div>
             </div>
+          {:else if activeSubPage === "worlds"}
+            <div class="h-full p-8 overflow-hidden will-change-transform">
+              <div class="max-w-6xl mx-auto h-full overflow-y-auto custom-scrollbar pr-4">
+                <WorldManager />
+              </div>
+            </div>
           {:else}
-            <div class="h-full flex flex-col items-center justify-center opacity-10 gap-6">
+            <div class="h-full flex flex-col items-center justify-center opacity-30 gap-6">
               {#if activeSubPage === 'players'}<Users size={80} />{/if}
               {#if activeSubPage === 'worlds'}<Globe2 size={80} />{/if}
               {#if activeSubPage === 'mods'}<Box size={80} />{/if}
               <p class="text-2xl font-black uppercase tracking-[0.3em]">{activeSubPage} Module</p>
-              <div class="badge badge-outline badge-lg p-4 font-bold opacity-50 italic">Development In Progress</div>
+              <div class="badge badge-outline badge-lg p-4 font-bold opacity-50 italic text-primary">Development In Progress</div>
             </div>
           {/if}
         </div>
@@ -311,11 +326,11 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 10px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.2);
   }
   .will-change-transform {
     will-change: transform;

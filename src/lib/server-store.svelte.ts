@@ -7,6 +7,7 @@ class ServerStore {
   config = $state<ServerConfig | null>(null);
   stats = $state<ServerStats>({ cpu: 0, memory: 0, status: "Offline", player_count: 0 });
   players = $state<PlayerInfo[]>([]);
+  worlds = $state<WorldInfo[]>([]);
   properties = $state<ServerProperties>({});
   logs = $state<string[]>([]);
   isDownloading = $state(false);
@@ -14,6 +15,35 @@ class ServerStore {
   constructor() {
     this.setupListeners();
     this.loadServers();
+  }
+
+  async refreshWorlds() {
+    if (this.config) {
+      try {
+        const w = await invoke("get_worlds", { path: this.config.path });
+        this.worlds = w as WorldInfo[];
+      } catch (e) {
+        console.error("Failed to fetch world data", e);
+      }
+    }
+  }
+
+  async backupWorld(worldName: string) {
+    if (this.config) {
+      this.logs = [...this.logs.slice(-500), `[System] Starting backup for: ${worldName}...`];
+      try {
+        const filename = await invoke("backup_world", { 
+          serverPath: this.config.path, 
+          worldName 
+        });
+        this.logs = [...this.logs.slice(-500), `[System] Backup successful: ${filename}`];
+        return filename;
+      } catch (e) {
+        console.error("Backup failed", e);
+        this.logs = [...this.logs.slice(-500), `[System] Backup failed: ${e}`];
+        throw e;
+      }
+    }
   }
 
   async refreshPlayers() {
