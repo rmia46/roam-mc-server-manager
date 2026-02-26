@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { ServerConfig, ServerStats, ServerProperties, ServerStatus } from "./types";
+import type { ServerConfig, ServerStats, ServerProperties, ServerStatus, PlayerInfo, WorldInfo } from "./types";
+
+const isTauri = () => !!(window as any).__TAURI_INTERNALS__;
 
 class ServerStore {
   servers = $state<ServerConfig[]>([]);
   config = $state<ServerConfig | null>(null);
-  stats = $state<ServerStats>({ cpu: 0, core_count: 1, memory: 0, status: "Offline", player_count: 0 });
+  stats = $state<ServerStats>({ cpu: 0, core_count: 1, memory: 0, status: "Offline", player_count: 0, tunnel_status: "Offline" });
   players = $state<PlayerInfo[]>([]);
   worlds = $state<WorldInfo[]>([]);
   properties = $state<ServerProperties>({});
@@ -13,12 +15,16 @@ class ServerStore {
   isDownloading = $state(false);
   
   constructor() {
-    this.setupListeners();
+    if (isTauri()) {
+      this.setupListeners();
+    } else {
+      console.warn("Tauri internals not found. Running in browser mode.");
+    }
     this.loadServers();
   }
 
   async refreshWorlds() {
-    if (this.config) {
+    if (this.config && isTauri()) {
       try {
         const w = await invoke("get_worlds", { path: this.config.path });
         this.worlds = w as WorldInfo[];
@@ -29,7 +35,7 @@ class ServerStore {
   }
 
   async backupWorld(worldName: string) {
-    if (this.config) {
+    if (this.config && isTauri()) {
       this.logs = [...this.logs.slice(-500), `[System] Starting backup for: ${worldName}...`];
       try {
         const filename = await invoke("backup_world", { 
@@ -47,7 +53,7 @@ class ServerStore {
   }
 
   async refreshPlayers() {
-    if (this.config) {
+    if (this.config && isTauri()) {
       try {
         const p = await invoke("get_players_data", { path: this.config.path });
         this.players = p as PlayerInfo[];
@@ -58,6 +64,8 @@ class ServerStore {
   }
 
   async setupListeners() {
+    if (!isTauri()) return;
+
     await listen<string>("server-log", (event) => {
       this.logs = [...this.logs.slice(-500), event.payload];
     });
@@ -69,12 +77,32 @@ class ServerStore {
     await listen<ServerStatus>("status-update", (event) => {
       this.stats.status = event.payload;
     });
+
+    await listen<any>("tunnel-status-update", (event) => {
+      this.stats.tunnel_status = event.payload;
+    });
+  }
+
+  async updateTunnelConfig(provider: "none" | "playit" | "ngrok", token: string) {
+    if (this.config) {
+      const updatedConfig = { 
+        ...this.config, 
+        tunnel: { provider, token, public_address: "" } 
+      };
+      const index = this.servers.findIndex(s => s.path === this.config?.path);
+      if (index !== -1) {
+        this.servers[index] = updatedConfig;
+        this.config = updatedConfig;
+        this.saveServers();
+        if (isTauri()) {
+          await invoke("set_server_config", { config: updatedConfig });
+        }
+      }
+    }
   }
 
   async loadServers() {
     try {
-      // We will implement persistent storage using tauri-plugin-fs or similar later
-      // For now, let's keep it in memory or simple local storage
       const saved = localStorage.getItem("mc_servers");
       if (saved) this.servers = JSON.parse(saved);
     } catch (e) {
@@ -83,7 +111,12 @@ class ServerStore {
   }
 
   saveServers() {
-    localStorage.setItem("mc_servers", JSON.stringify(this.servers));
+    try {
+      const data = JSON.parse(JSON.stringify(this.servers));
+      localStorage.setItem("mc_servers", JSON.stringify(data));
+    } catch (e) {
+      console.error("Failed to save servers:", e);
+    }
   }
 
   async addServer(name: string, path: string, jar: string, ram: number) {
@@ -103,7 +136,6 @@ class ServerStore {
     this.servers.splice(index, 1);
     this.saveServers();
     
-    // Clear current config if it was the one deleted
     if (this.config && deletedServer && this.config.path === deletedServer.path) {
       this.config = null;
     }
@@ -113,13 +145,16 @@ class ServerStore {
     const server = this.servers[index];
     if (server) {
       this.config = server;
-      await invoke("set_server_config", { config: server });
-      await this.refreshProperties();
+      if (isTauri()) {
+        await invoke("set_server_config", { config: server });
+        await this.refreshProperties();
+      }
       this.logs = [`[System] Selected server: ${server.name}`];
     }
   }
 
   async handleSelectJar() {
+    if (!isTauri()) return null;
     try {
       const config = await invoke("select_jar_file");
       return config as ServerConfig;
@@ -130,6 +165,7 @@ class ServerStore {
   }
 
   async toggleServer() {
+    if (!isTauri()) return;
     if (this.stats.status === "Running" || this.stats.status === "Starting") {
       await invoke("stop_server");
     } else {
@@ -141,13 +177,14 @@ class ServerStore {
   }
 
   async takeOverOrphan() {
+    if (!isTauri()) return;
     this.logs = [...this.logs.slice(-500), "[System] Taking control of orphaned process..."];
     await invoke("stop_server");
     await this.toggleServer();
   }
 
   async refreshProperties() {
-    if (this.config) {
+    if (this.config && isTauri()) {
       const props = await invoke("read_properties", { path: this.config.path });
       this.properties = props as ServerProperties;
     }
@@ -155,16 +192,17 @@ class ServerStore {
 
   async saveProperties(props: ServerProperties) {
     if (this.config) {
-      await invoke("write_properties", { path: this.config.path, props });
       this.properties = props;
+      if (isTauri()) {
+        await invoke("write_properties", { path: this.config.path, props });
+      }
     }
   }
 
   async sendCommand(command: string) {
-    if (this.stats.status === "Running") {
+    if (this.stats.status === "Running" && isTauri()) {
       try {
         await invoke("send_server_command", { command });
-        // Immediate visual feedback in console
         this.logs = [...this.logs.slice(-500), `[Input] > ${command}`];
       } catch (e) {
         console.error("Command failed:", e);
@@ -174,6 +212,7 @@ class ServerStore {
   }
 
   async refreshStats() {
+    if (!isTauri()) return;
     try {
       const s = await invoke("get_server_stats");
       this.stats = s as ServerStats;

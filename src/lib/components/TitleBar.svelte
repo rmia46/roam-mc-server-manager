@@ -28,6 +28,7 @@
 </script>
 
 <div 
+  role="presentation"
   class="titlebar {isMaximized ? 'sharp' : 'rounded'}" 
   onmousedown={handleMouseDown}
   ondblclick={handleDoubleClick}

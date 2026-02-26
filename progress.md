@@ -15,9 +15,12 @@
     - [x] Live Console with auto-scroll.
     - [x] Active Player Count tracking.
     - [x] Server Properties Editor.
-- [ ] **Cloud Sync (Future)**
-    - [ ] MEGA/Cloud folder locking system.
-    - [ ] Sync state detection.
+- [ ] **Automated Tunneling**
+    - [ ] Add "Network" subpage for configuration.
+    - [ ] Implement Playit.gg logic (Secret Key mode).
+    - [ ] Implement Ngrok logic (TCP Tunnel mode).
+    - [ ] Add Public IP display to Dashboard.
+    - [ ] Ensure tunnel lifecycle is bound to server process.
 
 ## 🛠️ Current Task: Template-Based Setup
 - [x] Update UI to allow `.jar` file selection.

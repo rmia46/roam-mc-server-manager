@@ -17,7 +17,8 @@
     Globe2,
     Box,
     ExternalLink,
-    TrendingUp
+    TrendingUp,
+    Globe
   } from "lucide-svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -26,9 +27,10 @@
   import TitleBar from "../lib/components/TitleBar.svelte";
   import PlayerManager from "../lib/components/PlayerManager.svelte";
   import WorldManager from "../lib/components/WorldManager.svelte";
+  import NetworkManager from "../lib/components/NetworkManager.svelte";
 
   const appWindow = getCurrentWindow();
-  let activeSubPage = $state("dashboard");
+  let activeSubPage = $state("dashboard"); // "dashboard", "players", "worlds", "mods", "network", "settings"
   let maxPlayers = $state(20);
   let isMaximized = $state(false);
   let commandInput = $state("");
@@ -84,7 +86,6 @@
   <TitleBar {isMaximized} />
 
   <div class="flex-1 flex overflow-hidden">
-    <!-- Optimized Sidebar -->
     <aside class="w-72 bg-base-100 border-r border-base-200 flex flex-col z-20 shadow-md">
       <div class="p-6 flex items-center gap-3 border-b border-base-200 bg-base-200/20">
         <div class="bg-primary text-primary-content p-2 rounded-xl shadow-sm"><Server size={20} /></div>
@@ -103,14 +104,14 @@
               <div class="space-y-4 pt-4 border-t border-base-200">
                 <h3 class="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 px-2">Control Panel</h3>
                 <div class="grid grid-cols-1 relative">
-                  <!-- Sliding background marker -->
                   <div 
                     class="absolute left-0 right-0 h-[42px] bg-primary rounded-xl transition-all duration-300 ease-out z-0 pointer-events-none shadow-lg shadow-primary/20"
                     style="transform: translateY({
                       activeSubPage === 'dashboard' ? '0%' : 
                       activeSubPage === 'players' ? '100%' : 
                       activeSubPage === 'worlds' ? '200%' : 
-                      activeSubPage === 'mods' ? '300%' : '400%'
+                      activeSubPage === 'mods' ? '300%' : 
+                      activeSubPage === 'network' ? '400%' : '500%'
                     });"
                   ></div>
 
@@ -139,10 +140,16 @@
                     <Box size={16} /> <span class="text-xs">Mods & Plugins</span>
                   </button>
                   <button 
+                    class="relative h-[42px] z-10 flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-300 {activeSubPage === 'network' ? 'text-primary-content font-bold' : 'hover:bg-base-200 opacity-80'}"
+                    onclick={() => activeSubPage = 'network'}
+                  >
+                    <Globe size={16} /> <span class="text-xs">Network</span>
+                  </button>
+                  <button 
                     class="relative h-[42px] z-10 flex items-center gap-3 w-full px-4 py-2.5 rounded-xl transition-colors duration-300 {activeSubPage === 'settings' ? 'text-primary-content font-bold' : 'hover:bg-base-200 opacity-80'}"
                     onclick={() => activeSubPage = 'settings'}
                   >
-                    <Settings2 size={16} /> <span class="text-xs">Server Settings</span>
+                    <Settings2 size={16} /> <span class="text-xs">Settings</span>
                   </button>
                 </div>
               </div>
@@ -162,7 +169,6 @@
       {/if}
     </aside>
 
-    <!-- Main Content Area -->
     <main class="flex-1 flex flex-col min-w-0 relative bg-base-300">
       {#if !serverStore.config}
         <div class="h-full flex flex-col items-center justify-center opacity-30 gap-4">
@@ -188,10 +194,7 @@
           </div>
         </header>
 
-        <!-- Standardized Page Switcher with consistent padding and max-width -->
         <div class="flex-1 relative overflow-hidden">
-          
-          <!-- Dashboard View -->
           <div class="absolute inset-0 p-8 flex flex-col gap-6 overflow-hidden {activeSubPage === 'dashboard' ? 'visible' : 'hidden'}">
             <div class="max-w-7xl mx-auto w-full h-full flex flex-col gap-6">
               <div class="grid grid-cols-2 xl:grid-cols-5 gap-6 shrink-0">
@@ -291,28 +294,22 @@
             </div>
           </div>
 
-          <!-- Settings View -->
-          <div class="absolute inset-0 p-8 flex justify-center overflow-hidden {activeSubPage === 'settings' ? 'visible' : 'hidden'}">
-            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4">
-              <ServerSettings />
-            </div>
+          <div class="absolute inset-0 p-8 overflow-hidden {activeSubPage === 'settings' ? 'visible' : 'hidden'}">
+            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4"><ServerSettings /></div>
           </div>
 
-          <!-- Players View -->
-          <div class="absolute inset-0 p-8 flex justify-center overflow-hidden {activeSubPage === 'players' ? 'visible' : 'hidden'}">
-            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4">
-              <PlayerManager />
-            </div>
+          <div class="absolute inset-0 p-8 overflow-hidden {activeSubPage === 'players' ? 'visible' : 'hidden'}">
+            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4"><PlayerManager /></div>
           </div>
 
-          <!-- Worlds View -->
-          <div class="absolute inset-0 p-8 flex justify-center overflow-hidden {activeSubPage === 'worlds' ? 'visible' : 'hidden'}">
-            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4">
-              <WorldManager />
-            </div>
+          <div class="absolute inset-0 p-8 overflow-hidden {activeSubPage === 'worlds' ? 'visible' : 'hidden'}">
+            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4"><WorldManager /></div>
           </div>
 
-          <!-- Placeholder -->
+          <div class="absolute inset-0 p-8 overflow-hidden {activeSubPage === 'network' ? 'visible' : 'hidden'}">
+            <div class="max-w-7xl mx-auto w-full h-full overflow-y-auto custom-scrollbar pr-4"><NetworkManager /></div>
+          </div>
+
           <div class="absolute inset-0 p-8 flex flex-col items-center justify-center opacity-30 gap-6 {activeSubPage === 'mods' ? 'visible' : 'hidden'}">
             <Box size={80} /><p class="text-2xl font-black uppercase tracking-[0.3em]">Mods & Plugins Module</p>
             <div class="badge badge-outline badge-lg p-4 font-bold opacity-50 italic text-primary">Development In Progress</div>
@@ -327,5 +324,22 @@
 <style>
   :global(body) {
     background-color: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .will-change-scroll {
+    will-change: scroll-position;
   }
 </style>

@@ -125,7 +125,7 @@
         <button class="btn btn-block btn-primary" onclick={handleMainSubmit} disabled={!newServerName || !newServerJar}>Next Step</button>
       </div>
     </div>
-    <div class="modal-backdrop bg-black/80" onclick={() => showModal = false}></div>
+    <div class="modal-backdrop bg-black/80" role="presentation" onclick={() => showModal = false}></div>
   </div>
 {/if}
 
@@ -178,6 +178,6 @@
         <button class="btn btn-primary flex-1 shadow-lg" onclick={finishCreation}>Initialize & Start</button>
       </div>
     </div>
-    <div class="modal-backdrop bg-black/80"></div>
+    <div class="modal-backdrop bg-black/80" role="presentation" onclick={() => showWizard = false}></div>
   </div>
 {/if}

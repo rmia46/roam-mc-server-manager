@@ -11,12 +11,20 @@ use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct TunnelConfig {
+    pub provider: String,
+    pub token: String,
+    pub public_address: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ServerConfig {
     pub name: Option<String>,
     pub path: String,
     pub jar_name: String,
     pub min_ram: String,
     pub max_ram: String,
+    pub tunnel: Option<TunnelConfig>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -27,6 +35,14 @@ pub enum ServerStatus {
     Stopping,
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub enum TunnelStatus {
+    Offline,
+    Connecting,
+    Online,
+    Error,
+}
+
 #[derive(Serialize)]
 pub struct ServerStats {
     pub cpu: f32,
@@ -34,6 +50,7 @@ pub struct ServerStats {
     pub memory: u64,
     pub status: ServerStatus,
     pub player_count: i32,
+    pub tunnel_status: TunnelStatus,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -54,8 +71,10 @@ pub struct WorldInfo {
 pub struct AppState {
     pub config: Mutex<Option<ServerConfig>>,
     pub child_process: Mutex<Option<Child>>,
+    pub tunnel_process: Mutex<Option<Child>>,
     pub player_count: Arc<Mutex<i32>>,
     pub status: Arc<Mutex<ServerStatus>>,
+    pub tunnel_status: Arc<Mutex<TunnelStatus>>,
     pub sys: Mutex<System>,
 }
 
@@ -77,9 +96,67 @@ fn find_orphaned_java_process(server_path: &str) -> Option<Pid> {
 }
 
 #[tauri::command]
+async fn start_tunnel(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let config = {
+        let conf = state.config.lock().unwrap();
+        conf.clone().ok_or("Server not configured")?
+    };
+
+    let tunnel_config = config.tunnel.ok_or("Tunnel not configured")?;
+    if tunnel_config.provider == "none" { return Ok(()); }
+
+    let mut tunnel_process = state.tunnel_process.lock().unwrap();
+    if tunnel_process.is_some() { return Err("Tunnel already running".into()); }
+
+    let mut cmd = if tunnel_config.provider == "ngrok" {
+        let mut c = Command::new("ngrok");
+        c.args(["tcp", "25565", "--authtoken", &tunnel_config.token]);
+        c
+    } else {
+        let mut c = Command::new("playit");
+        // Playit usually looks for a secret in a config or via arg
+        c.args(["--secret", &tunnel_config.token]);
+        c
+    };
+
+    let mut child = cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to launch tunnel binary: {}. Ensure it is installed and in PATH.", e))?;
+
+    let stdout = child.stdout.take().unwrap();
+    let app_clone = app.clone();
+    let tunnel_status_clone = Arc::clone(&state.tunnel_status);
+
+    // Monitor tunnel output for success/errors
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                app_clone.emit("server-log", format!("[Tunnel] {}", l)).unwrap();
+                
+                // Detection logic for "Online" status
+                if l.contains("client session established") || l.contains("tunnel available at") {
+                    let mut ts = tunnel_status_clone.lock().unwrap();
+                    *ts = TunnelStatus::Online;
+                    app_clone.emit("tunnel-status-update", TunnelStatus::Online).unwrap();
+                }
+            }
+        }
+        let mut ts = tunnel_status_clone.lock().unwrap();
+        *ts = TunnelStatus::Offline;
+        app_clone.emit("tunnel-status-update", TunnelStatus::Offline).unwrap();
+    });
+
+    *tunnel_process = Some(child);
+    Ok(())
+}
+
+#[tauri::command]
 async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, String> {
     let pc = *state.player_count.lock().unwrap();
     let mut status = state.status.lock().unwrap().clone();
+    let tunnel_status = state.tunnel_status.lock().unwrap().clone();
     let mut sys = state.sys.lock().unwrap();
     
     sys.refresh_all();
@@ -92,12 +169,15 @@ async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, Str
             Ok(None) => {
                 let pid = Pid::from(child.id() as usize);
                 if let Some(process) = sys.process(pid) {
+                    let core_count_f = core_count as f32;
+                    let normalized_cpu = if core_count_f > 0.0 { process.cpu_usage() / core_count_f } else { process.cpu_usage() };
                     return Ok(ServerStats { 
-                        cpu: process.cpu_usage(), 
+                        cpu: process.cpu_usage(), // Send raw for precision as requested earlier
                         core_count,
                         memory: process.memory(), 
                         status, 
-                        player_count: pc 
+                        player_count: pc,
+                        tunnel_status
                     });
                 }
             }
@@ -115,13 +195,14 @@ async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, Str
                     core_count,
                     memory: process.memory(), 
                     status, 
-                    player_count: pc 
+                    player_count: pc,
+                    tunnel_status
                 });
             }
         }
     }
 
-    Ok(ServerStats { cpu: 0.0, core_count, memory: 0, status: ServerStatus::Offline, player_count: pc })
+    Ok(ServerStats { cpu: 0.0, core_count, memory: 0, status: ServerStatus::Offline, player_count: pc, tunnel_status })
 }
 
 #[tauri::command]
@@ -186,7 +267,7 @@ async fn select_jar_file(app: tauri::AppHandle) -> Result<Option<ServerConfig>, 
         let path = Path::new(&path_str);
         let parent = path.parent().ok_or("Invalid path")?.to_string_lossy().to_string();
         let file_name = path.file_name().ok_or("Invalid filename")?.to_string_lossy().to_string();
-        Ok(Some(ServerConfig { name: None, path: parent, jar_name: file_name, min_ram: "1G".into(), max_ram: "2G".into() }))
+        Ok(Some(ServerConfig { name: None, path: parent, jar_name: file_name, min_ram: "1G".into(), max_ram: "2G".into(), tunnel: None }))
     } else { Ok(None) }
 }
 
@@ -208,6 +289,18 @@ async fn start_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resu
     }
     let mut child_process = state.child_process.lock().unwrap();
     if child_process.is_some() { return Err("Server already running".into()); }
+    
+    // Start Tunnel if configured
+    if let Some(tunnel) = config.tunnel.as_ref() {
+        if tunnel.provider != "none" {
+            let mut tunnel_status = state.tunnel_status.lock().unwrap();
+            *tunnel_status = TunnelStatus::Connecting;
+            app.emit("tunnel-status-update", TunnelStatus::Connecting).unwrap();
+            
+            // Logic to launch tunnel will go here in next step
+        }
+    }
+
     {
         let mut status = state.status.lock().unwrap();
         *status = ServerStatus::Starting;
@@ -266,6 +359,18 @@ async fn stop_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
         *status = ServerStatus::Stopping;
         app.emit("status-update", ServerStatus::Stopping).unwrap();
     }
+
+    // Stop Tunnel
+    {
+        let mut tunnel_process = state.tunnel_process.lock().unwrap();
+        if let Some(mut child) = tunnel_process.take() {
+            let _ = child.kill();
+        }
+        let mut tunnel_status = state.tunnel_status.lock().unwrap();
+        *tunnel_status = TunnelStatus::Offline;
+        app.emit("tunnel-status-update", TunnelStatus::Offline).unwrap();
+    }
+
     let mut child_process = state.child_process.lock().unwrap();
     let mut stopped = false;
     if let Some(mut child) = child_process.take() {
@@ -411,6 +516,20 @@ fn open_folder(app: tauri::AppHandle, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn find_binary(name: String) -> Option<String> {
+    // Check system PATH using which (Linux/Mac) or where (Windows)
+    let cmd = if cfg!(windows) { "where" } else { "which" };
+    if let Ok(output) = Command::new(cmd).arg(&name).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            // 'where' can return multiple lines on Windows, take the first one
+            return Some(path.lines().next().unwrap_or("").to_string());
+        }
+    }
+    None
+}
+
+#[tauri::command]
 fn delete_directory(path: String) -> Result<(), String> {
     fs::remove_dir_all(path).map_err(|e| e.to_string())
 }
@@ -427,16 +546,26 @@ pub fn run() {
         .manage(AppState {
             config: Mutex::new(None),
             child_process: Mutex::new(None),
+            tunnel_process: Mutex::new(None),
             player_count: Arc::new(Mutex::new(0)),
             status: Arc::new(Mutex::new(ServerStatus::Offline)),
+            tunnel_status: Arc::new(Mutex::new(TunnelStatus::Offline)),
             sys: Mutex::new(System::new_all()),
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {
                 let state: State<AppState> = window.state();
+                
+                // Kill Server
                 let mut child_process = state.child_process.lock().unwrap();
                 if let Some(mut child) = child_process.take() {
-                    let _ = child.kill().map_err(|e: std::io::Error| e.to_string());
+                    let _ = child.kill();
+                }
+
+                // Kill Tunnel
+                let mut tunnel_process = state.tunnel_process.lock().unwrap();
+                if let Some(mut child) = tunnel_process.take() {
+                    let _ = child.kill();
                 }
             }
         })
@@ -448,7 +577,8 @@ pub fn run() {
             read_properties, write_properties, select_jar_file,
             close_window, minimize_window, maximize_window,
             is_server_initialized, delete_directory, get_players_data,
-            send_server_command, open_folder, get_worlds, backup_world
+            send_server_command, open_folder, get_worlds, backup_world,
+            start_tunnel, find_binary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

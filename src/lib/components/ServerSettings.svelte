@@ -157,6 +157,6 @@
         </button>
       </div>
     </div>
-    <div class="modal-backdrop bg-black/80" onclick={() => showDeleteConfirm = false}></div>
+    <div class="modal-backdrop bg-black/80" role="presentation" onclick={() => showDeleteConfirm = false}></div>
   </div>
 {/if}
