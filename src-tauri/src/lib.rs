@@ -30,6 +30,7 @@ pub enum ServerStatus {
 #[derive(Serialize)]
 pub struct ServerStats {
     pub cpu: f32,
+    pub core_count: usize,
     pub memory: u64,
     pub status: ServerStatus,
     pub player_count: i32,
@@ -55,6 +56,7 @@ pub struct AppState {
     pub child_process: Mutex<Option<Child>>,
     pub player_count: Arc<Mutex<i32>>,
     pub status: Arc<Mutex<ServerStatus>>,
+    pub sys: Mutex<System>,
 }
 
 fn find_orphaned_java_process(server_path: &str) -> Option<Pid> {
@@ -75,39 +77,69 @@ fn find_orphaned_java_process(server_path: &str) -> Option<Pid> {
 }
 
 #[tauri::command]
+async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, String> {
+    let pc = *state.player_count.lock().unwrap();
+    let mut status = state.status.lock().unwrap().clone();
+    let mut sys = state.sys.lock().unwrap();
+    
+    sys.refresh_all();
+    let core_count = sys.cpus().len();
+
+    let mut child_lock = state.child_process.lock().unwrap();
+    if let Some(child) = child_lock.as_mut() {
+        match child.try_wait() {
+            Ok(Some(_)) => *child_lock = None,
+            Ok(None) => {
+                let pid = Pid::from(child.id() as usize);
+                if let Some(process) = sys.process(pid) {
+                    return Ok(ServerStats { 
+                        cpu: process.cpu_usage(), 
+                        core_count,
+                        memory: process.memory(), 
+                        status, 
+                        player_count: pc 
+                    });
+                }
+            }
+            Err(_) => *child_lock = None,
+        }
+    }
+
+    let config_lock = state.config.lock().unwrap();
+    if let Some(config) = config_lock.as_ref() {
+        if let Some(pid) = find_orphaned_java_process(&config.path) {
+            if let Some(process) = sys.process(pid) {
+                if status == ServerStatus::Offline { status = ServerStatus::Running; }
+                return Ok(ServerStats { 
+                    cpu: process.cpu_usage(), 
+                    core_count,
+                    memory: process.memory(), 
+                    status, 
+                    player_count: pc 
+                });
+            }
+        }
+    }
+
+    Ok(ServerStats { cpu: 0.0, core_count, memory: 0, status: ServerStatus::Offline, player_count: pc })
+}
+
+#[tauri::command]
 async fn get_worlds(path: String) -> Result<Vec<WorldInfo>, String> {
     let mut worlds = Vec::new();
     let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
-
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
         if path.is_dir() && path.join("level.dat").exists() {
             let name = path.file_name().unwrap().to_string_lossy().to_string();
             let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
-            
-            // Format time using chrono
             let last_modified = if let Ok(time) = metadata.modified() {
                 let dt: chrono::DateTime<chrono::Local> = time.into();
                 dt.format("%d %b %Y, %H:%M").to_string()
-            } else {
-                "Unknown".to_string()
-            };
-            
-            // Calculate total size of directory
-            let total_size: u64 = WalkDir::new(&path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter_map(|e| e.metadata().ok())
-                .filter(|m| m.is_file())
-                .map(|m| m.len())
-                .sum();
-
-            worlds.push(WorldInfo {
-                name,
-                size_mb: (total_size as f64) / 1024.0 / 1024.0,
-                last_modified,
-            });
+            } else { "Unknown".to_string() };
+            let total_size: u64 = WalkDir::new(&path).into_iter().filter_map(|e| e.ok()).filter_map(|e| e.metadata().ok()).filter(|m| m.is_file()).map(|m| m.len()).sum();
+            worlds.push(WorldInfo { name, size_mb: (total_size as f64) / 1024.0 / 1024.0, last_modified });
         }
     }
     Ok(worlds)
@@ -117,27 +149,18 @@ async fn get_worlds(path: String) -> Result<Vec<WorldInfo>, String> {
 async fn backup_world(server_path: String, world_name: String) -> Result<String, String> {
     let world_dir = Path::new(&server_path).join(&world_name);
     let backup_dir = Path::new(&server_path).join("roam_backups");
-    
-    if !backup_dir.exists() {
-        fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
-    }
-
+    if !backup_dir.exists() { fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?; }
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
     let backup_filename = format!("{}_{}.zip", world_name, timestamp);
     let backup_path = backup_dir.join(&backup_filename);
-
     let file = fs::File::create(&backup_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o755);
-
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(0o755);
     let mut buffer = Vec::new();
     for entry in WalkDir::new(&world_dir) {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
         let name = path.strip_prefix(&world_dir).map_err(|e| e.to_string())?;
-
         if path.is_file() {
             zip.start_file(name.to_string_lossy().to_string(), options).map_err(|e| e.to_string())?;
             let mut f = fs::File::open(path).map_err(|e| e.to_string())?;
@@ -148,7 +171,6 @@ async fn backup_world(server_path: String, world_name: String) -> Result<String,
             zip.add_directory(name.to_string_lossy().to_string(), options).map_err(|e| e.to_string())?;
         }
     }
-
     zip.finish().map_err(|e| e.to_string())?;
     Ok(backup_filename)
 }
@@ -280,39 +302,6 @@ async fn stop_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
-async fn get_server_stats(state: State<'_, AppState>) -> Result<ServerStats, String> {
-    let mut child_lock = state.child_process.lock().unwrap();
-    let pc = *state.player_count.lock().unwrap();
-    let mut status = state.status.lock().unwrap().clone();
-    if let Some(child) = child_lock.as_mut() {
-        match child.try_wait() {
-            Ok(Some(_)) => *child_lock = None,
-            Ok(None) => {
-                let pid = Pid::from(child.id() as usize);
-                let mut sys = System::new_all();
-                sys.refresh_all();
-                if let Some(process) = sys.process(pid) {
-                    return Ok(ServerStats { cpu: process.cpu_usage(), memory: process.memory(), status, player_count: pc });
-                }
-            }
-            Err(_) => *child_lock = None,
-        }
-    }
-    let config_lock = state.config.lock().unwrap();
-    if let Some(config) = config_lock.as_ref() {
-        if let Some(pid) = find_orphaned_java_process(&config.path) {
-            let mut sys = System::new_all();
-            sys.refresh_all();
-            if let Some(process) = sys.process(pid) {
-                if status == ServerStatus::Offline { status = ServerStatus::Running; }
-                return Ok(ServerStats { cpu: process.cpu_usage(), memory: process.memory(), status, player_count: pc });
-            }
-        }
-    }
-    Ok(ServerStats { cpu: 0.0, memory: 0, status: ServerStatus::Offline, player_count: pc })
-}
-
-#[tauri::command]
 async fn read_properties(path: String) -> Result<HashMap<String, String>, String> {
     let prop_path = Path::new(&path).join("server.properties");
     if !prop_path.exists() { return Ok(HashMap::new()); }
@@ -440,6 +429,7 @@ pub fn run() {
             child_process: Mutex::new(None),
             player_count: Arc::new(Mutex::new(0)),
             status: Arc::new(Mutex::new(ServerStatus::Offline)),
+            sys: Mutex::new(System::new_all()),
         })
         .on_window_event(|window, event| {
             if let WindowEvent::Destroyed = event {

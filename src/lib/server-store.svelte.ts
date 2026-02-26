@@ -5,7 +5,7 @@ import type { ServerConfig, ServerStats, ServerProperties, ServerStatus } from "
 class ServerStore {
   servers = $state<ServerConfig[]>([]);
   config = $state<ServerConfig | null>(null);
-  stats = $state<ServerStats>({ cpu: 0, memory: 0, status: "Offline", player_count: 0 });
+  stats = $state<ServerStats>({ cpu: 0, core_count: 1, memory: 0, status: "Offline", player_count: 0 });
   players = $state<PlayerInfo[]>([]);
   worlds = $state<WorldInfo[]>([]);
   properties = $state<ServerProperties>({});

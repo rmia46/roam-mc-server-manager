@@ -8,6 +8,7 @@ export interface ServerConfig {
 
 export interface ServerStats {
   cpu: number;
+  core_count: number;
   memory: number;
   status: "Offline" | "Starting" | "Running" | "Stopping";
   player_count: number;
